@@ -18,15 +18,14 @@ class Logger:
 
     def log_message(self, msg): # Works
         timestamp = datetime.now().strftime("%H:%M:%S")
-        full_msg = f"[{timestamp}] {msg}"
-        print(full_msg)  # always print to console
+        full_msg = f"[{timestamp}] {msg}"  # always print to console
         if self.log_callback:
             self.log_callback(full_msg)  # send to GUI log window
 
     def set_holesaw_name(self, name): #Works
         self.holesaw_name = name
         self.last_file = None
-        self.log_message(f"Holesaw set to: {name}")
+        #self.log_message(f"Holesaw set to: {name}")
 
     def _generate_filename(self): 
         date_str = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
@@ -36,35 +35,58 @@ class Logger:
         readings = self.vfd.read_all()
         if readings["torque_ratio"] is not None and readings["rpm"] is not None:
             now = datetime.now().strftime("%H:%M:%S")
-
             # Cycle start detection (>=200 rpm and torque > 1)
             if readings["torque_ratio"] > 1 and readings["rpm"] >= 200 and not self.in_cycle:
+                self.set_holesaw_name(self.holesaw_name)
                 self.cycle_count += 1
                 self.in_cycle = True
                 self.log_message(f"Cycle {self.cycle_count} started")
-
+                # Add a separator and cycle header to the DataFrame
+                self.data = pd.concat([
+                    self.data,
+                    pd.DataFrame([
+                        {col: "" for col in self.data.columns},
+                        {"Cycle": f"Cycle {self.cycle_count}", **{col: "" for col in self.data.columns if col != "Cycle"}}
+                    ])
+                ], ignore_index=True)
+                
             # Cycle end detection
             elif readings["torque_ratio"] <= 1 and self.in_cycle:
                 self.in_cycle = False
                 self.log_message(f"Cycle {self.cycle_count} ended")
                 self.save_to_file()
 
-            # Log data row
-            self.data.loc[len(self.data)] = [
+            if readings["torque_ratio"] > 1 and readings["rpm"] >= 200:
+                torqueRatio = self.vfd.read_torque_ratio()
+                rpm = self.vfd.read_rpm()
+                voltage = self.vfd.read_voltage()
+                current = self.vfd.read_current()
+                self.log_message(f"Torque Ratio: {torqueRatio}, RPM: {rpm}, Voltage: {voltage}, Current: {current}")
+                self.data.loc[len(self.data)] = [
                 self.cycle_count, now,
                 readings["torque_ratio"], readings["voltage"],
                 readings["current"], readings["rpm"]
             ]
 
+            # Log data row
+            
+        else:
+            self.log_message("Error reading VFD data")
+
     def save_to_file(self):
         if not self.holesaw_name:
             self.log_message("⚠️ No holesaw name set. Skipping save.")
             return
+        # Always use the same file for the current holesaw session
         if not self.last_file:
-            self.last_file = self._generate_filename()
-        self.data.to_csv(self.last_file, index=False)
+            date_str = datetime.now().strftime("%Y-%m-%d")
+            self.last_file = os.path.join(self.base_path, f"vfd_cycles_{self.holesaw_name}_{date_str}.csv")
+        file_exists = os.path.isfile(self.last_file)
+        self.log_message(f"Saving data to {self.last_file}")
+        # Always append to the same file, only write header if file doesn't exist
+        self.data.to_csv(self.last_file, mode='a', header=not file_exists, index=False)
         self.log_message(f"Data saved to {self.last_file}")
-        print(f"it worked")
+        self.data = pd.DataFrame(columns=["Cycle", "Time", "Torque", "Voltage", "Current", "RPM"])  # Clear after saving
     
     def start_stop(self, started: bool):
         if started:

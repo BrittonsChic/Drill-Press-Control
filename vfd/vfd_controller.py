@@ -41,12 +41,9 @@ class VFDController:
 
     def set_frequency(self, hz):
         self.client.write_register(0x2001, hz)
-        print(f"Set frequency to {hz/100} Hz")
 
     def start(self):
         self.client.write_register(0x2000, 0x0012)
-        print("VFD started")
 
     def stop(self):
         self.client.write_register(0x2000, 0x0001)
-        print("VFD stopped")
